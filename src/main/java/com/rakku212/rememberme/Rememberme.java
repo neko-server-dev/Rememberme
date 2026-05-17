@@ -1,6 +1,7 @@
 package com.rakku212.rememberme;
 
 import com.google.inject.Inject;
+import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
@@ -11,7 +12,6 @@ import com.velocitypowered.api.proxy.ProxyServer;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.UUID;
 import java.nio.file.Files;
 
 @Plugin(
@@ -42,34 +42,38 @@ public class Rememberme {
         Player player = event.getPlayer();
         player.getCurrentServer().ifPresent(registeredServer -> {
             String serverName = registeredServer.getServerInfo().getName();
-            UUID uuid = player.getUniqueId();
-            Path playerFile = dataDirectory.resolve(uuid + ".txt");
+            Path playerFile = dataDirectory.resolve(player.getUniqueId() + ".txt");
 
-            try {
-                Files.writeString(playerFile, serverName);
-            } catch (IOException e) {
-                logger.error("Failed to save player data", e);
-            }
+            server.getScheduler().buildTask(this, () -> {
+                try {
+                    Files.writeString(playerFile, serverName);
+                } catch (IOException e) {
+                    logger.error("Failed to save player data", e);
+                }
+            }).schedule();
         });
     }
 
-
     @Subscribe
-    public void onChooseInitialServer(PlayerChooseInitialServerEvent event) {
-        UUID uuid = event.getPlayer().getUniqueId();
-        Path playerFile = dataDirectory.resolve(uuid + ".txt");
+    public EventTask onChooseInitialServer(PlayerChooseInitialServerEvent event) {
+        Path playerFile = dataDirectory.resolve(event.getPlayer().getUniqueId() + ".txt");
 
-        try {
-            if (!Files.exists(playerFile)) {
-                return;
-            }
-            String lastServerName = Files.readString(playerFile).trim();
-            if (lastServerName.isEmpty() || lastServerName.equals("lobby")) {
-                return;
-            }
-            server.getServer(lastServerName).ifPresent(event::setInitialServer);
-        } catch (IOException e) {
-            logger.error("Failed to fetch player data", e);
-        }
+        return EventTask.withContinuation(continuation ->
+                server.getScheduler().buildTask(this, () -> {
+                    try {
+                        if (!Files.exists(playerFile)) {
+                            return;
+                        }
+                        String lastServerName = Files.readString(playerFile).trim();
+                        if (lastServerName.isEmpty() || lastServerName.equals("lobby")) {
+                            return;
+                        }
+                        server.getServer(lastServerName).ifPresent(event::setInitialServer);
+                    } catch (IOException e) {
+                        logger.error("Failed to fetch player data", e);
+                    } finally {
+                        continuation.resume();
+                    }
+                }).schedule());
     }
 }
